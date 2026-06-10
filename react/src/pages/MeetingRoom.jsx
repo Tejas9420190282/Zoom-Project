@@ -3,7 +3,7 @@
 import { useParams } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { Mic, Video, MessageSquare, MonitorUp, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { socket } from "../socket";
 
@@ -24,6 +24,22 @@ function MeetingRoom() {
   const currentUser = JSON.parse(localStorage.getItem("user"));
 
   const navigate = useNavigate();
+
+  const localVideoRef = useRef(null);
+
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCameraOn, setIsCameraOn] = useState(true);
+
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
+
+  const [localStream, setLocalStream] = useState(null);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
 
   useEffect(() => {
     const getParticipants = async () => {
@@ -175,6 +191,139 @@ function MeetingRoom() {
     }
   };
 
+  useEffect(() => {
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+
+        setLocalStream(stream);
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      localStream?.getTracks().forEach((track) => {
+        track.stop();
+      });
+
+      screenStreamRef.current?.getTracks().forEach((track) => {
+        track.stop();
+      });
+    };
+  }, []);
+
+  const handleMicToggle = () => {
+    if (!localStream) return;
+
+    const audioTrack = localStream.getAudioTracks()[0];
+
+    if (!audioTrack) return;
+
+    audioTrack.enabled = !audioTrack.enabled;
+
+    setIsMicOn(audioTrack.enabled);
+  };
+
+  const handleCameraToggle = async () => {
+    try {
+      // Turn Camera OFF
+      if (isCameraOn) {
+        const videoTrack = localStream?.getVideoTracks()[0];
+
+        if (videoTrack) {
+          videoTrack.stop();
+        }
+
+        setIsCameraOn(false);
+        return;
+      }
+
+      // Turn Camera ON
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      const updatedStream = new MediaStream();
+
+      if (newVideoTrack) {
+        updatedStream.addTrack(newVideoTrack);
+      }
+
+      // keep existing microphone
+      const audioTrack = localStream?.getAudioTracks()[0];
+
+      if (audioTrack && audioTrack.readyState === "live") {
+        updatedStream.addTrack(audioTrack);
+      }
+
+      setLocalStream(updatedStream);
+
+      setIsCameraOn(true);
+    } catch (error) {
+      console.error("Camera Toggle Error:", error);
+    }
+  };
+
+  const handleScreenShare = async () => {
+    try {
+      // Stop Screen Sharing
+      if (isScreenSharing) {
+        screenStreamRef.current?.getTracks().forEach((track) => {
+          track.stop();
+        });
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = null;
+          localVideoRef.current.srcObject = screenStream;
+          await localVideoRef.current.play();
+        }
+
+        setIsScreenSharing(false);
+
+        return;
+      }
+
+      // Start Screen Sharing
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+
+      screenStreamRef.current = screenStream;
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = screenStream;
+      }
+
+      setIsScreenSharing(true);
+
+      // User clicks "Stop Sharing" from browser popup
+      screenStream.getVideoTracks()[0].onended = async () => {
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = null;
+          localVideoRef.current.srcObject = localStream;
+          await localVideoRef.current.play();
+        }
+
+        setIsScreenSharing(false);
+      };
+    } catch (error) {
+      console.error("Screen Share Error:", error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="flex h-screen">
@@ -243,25 +392,57 @@ function MeetingRoom() {
             <div className="flex flex-col h-full">
               <div className="flex-1 bg-[#1c1c1c] rounded-xl flex items-center justify-center">
                 <div className="flex-1 bg-[#1c1c1c] rounded-xl flex items-center justify-center">
-                  <div className="flex flex-col items-center">
-                    <div className="w-32 h-32 rounded-full bg-blue-600 text-white text-5xl font-bold flex items-center justify-center">
-                      T
+                  <div className="relative w-full h-full flex items-center justify-center p-4">
+                    {isCameraOn ? (
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-full rounded-xl object-cover"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center w-full h-full">
+                        <div className="w-32 h-32 rounded-full bg-blue-600 text-white text-5xl font-bold flex items-center justify-center">
+                          {currentUser?.name?.charAt(0)?.toUpperCase()}
+                        </div>
+
+                        <p className="mt-4 text-white text-xl">
+                          {currentUser?.name}
+                        </p>
+
+                        <p className="text-gray-400">Camera Off</p>
+                      </div>
+                    )}
+
+                    <div className="absolute bottom-4 left-4 bg-black/70 text-white px-3 py-1 rounded-lg">
+                      {currentUser?.name}
                     </div>
-
-                    <p className="mt-4 text-white text-xl">Tejas</p>
-
-                    <p className="text-gray-400 text-sm">Camera Off</p>
                   </div>
                 </div>
               </div>
 
               <div className="flex justify-center mt-5">
                 <div className="bg-black/90 px-6 py-3 rounded-full flex gap-4 shadow-xl">
-                  <button className="p-3 bg-gray-700 rounded-full text-white hover:bg-gray-600">
-                    <Mic size={20} />
+                  <button
+                    onClick={handleMicToggle}
+                    className={`p-3 rounded-full text-white ${
+                      isMicOn
+                        ? "bg-gray-700 hover:bg-gray-600"
+                        : "bg-red-600 hover:bg-red-700"
+                    }`}
+                  >
+                    <Mic size={20} strokeWidth={2.5} />
                   </button>
 
-                  <button className="p-3 bg-gray-700 rounded-full text-white hover:bg-gray-600">
+                  <button
+                    onClick={handleCameraToggle}
+                    className={`p-3 rounded-full text-white ${
+                      isCameraOn
+                        ? "bg-gray-700 hover:bg-gray-600"
+                        : "bg-red-600 hover:bg-red-700"
+                    }`}
+                  >
                     <Video size={20} />
                   </button>
 
@@ -274,7 +455,14 @@ function MeetingRoom() {
                     <MessageSquare size={20} />
                   </button>
 
-                  <button className="p-3 bg-gray-700 rounded-full text-white hover:bg-gray-600">
+                  <button
+                    onClick={handleScreenShare}
+                    className={`p-3 rounded-full text-white ${
+                      isScreenSharing
+                        ? "bg-blue-600"
+                        : "bg-gray-700 hover:bg-gray-600"
+                    }`}
+                  >
                     <MonitorUp size={20} />
                   </button>
 
