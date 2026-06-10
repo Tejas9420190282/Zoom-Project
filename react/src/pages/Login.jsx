@@ -13,7 +13,7 @@ const Login = () => {
 
   const navigate = useNavigate();
 
-    const handleLogin = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     try {
       const responce = await axios.post(
@@ -26,6 +26,9 @@ const Login = () => {
 
       if (responce.data.success) {
         localStorage.setItem("token", responce.data.token);
+
+        localStorage.setItem("user", JSON.stringify(responce.data.user));
+
         setMessage(responce.data.message);
 
         navigate("/home");

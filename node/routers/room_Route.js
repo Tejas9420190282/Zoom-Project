@@ -6,6 +6,8 @@ const {
   create_Room_Controller,
   join_Room_Controller,
   get_Room_Participants_Controller,
+  leave_Room_Controller,
+  end_Meeting_Controller,
 } = require("../controllers/room");
 
 const router = express.Router();
@@ -29,5 +31,21 @@ router.post("/create-room", authMiddleware, create_Room_Controller);
 router.get("/:roomId/participants", authMiddleware,
   get_Room_Participants_Controller,
 );
+
+
+// =====================================
+// Leave Meeting & Room Router
+// =====================================
+
+router.post("/leave-room", authMiddleware, leave_Room_Controller);
+
+module.exports = router;
+
+
+// =====================================
+// End Meeting & Room Router
+// =====================================
+
+router.post("/end-meeting", authMiddleware, end_Meeting_Controller);
 
 module.exports = router;

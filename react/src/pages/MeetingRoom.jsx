@@ -1,14 +1,8 @@
 // MeetingRoom.jsx
 
 import { useParams } from "react-router-dom";
-import {
-  Mic,
-  Video,
-  MessageSquare,
-  MonitorUp,
-  PhoneOff,
-  Users,
-} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Mic, Video, MessageSquare, MonitorUp, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { socket } from "../socket";
@@ -24,6 +18,13 @@ function MeetingRoom() {
 
   const [showParticipants, setShowParticipants] = useState(false);
 
+  const [isHost, setIsHost] = useState(false);
+  const [roomInfo, setRoomInfo] = useState(null);
+
+  const currentUser = JSON.parse(localStorage.getItem("user"));
+
+  const navigate = useNavigate();
+
   useEffect(() => {
     const getParticipants = async () => {
       const token = localStorage.getItem("token");
@@ -38,6 +39,16 @@ function MeetingRoom() {
       );
 
       setParticipants(response.data.participants);
+
+      setRoomInfo(response.data.room);
+
+      const currentUser = JSON.parse(localStorage.getItem("user"));
+
+      if (currentUser && response.data.room.hostId === currentUser.id) {
+        setIsHost(true);
+      } else {
+        setIsHost(false);
+      }
 
       console.log(response.data.participants);
     };
@@ -69,11 +80,18 @@ function MeetingRoom() {
       setMessages((prev) => [...prev, data]);
     });
 
+    socket.on("meeting-ended", (message) => {
+      alert(message);
+
+      navigate("/home");
+    });
+
     return () => {
       socket.off("user-joined");
       socket.off("receive-message");
+      socket.off("meeting-ended");
     };
-  }, [roomId]);
+  }, [roomId, navigate]);
 
   useEffect(() => {
     const getMessages = async () => {
@@ -108,6 +126,53 @@ function MeetingRoom() {
     });
 
     setMessage("");
+  };
+
+  const handleLeaveRoom = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      await axios.post(
+        "http://localhost:1819/api/room/leave-room",
+        { roomId },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      navigate("/home");
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleEndMeeting = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await axios.post(
+        "http://localhost:1819/api/room/end-meeting",
+        { roomId },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      // Notify all participants
+      socket.emit("end-meeting", roomId);
+
+      alert(response.data.message);
+
+      navigate("/home");
+    } catch (error) {
+      console.error(error);
+
+      alert(error.response?.data?.message || "Failed to end meeting");
+    }
   };
 
   return (
@@ -213,9 +278,23 @@ function MeetingRoom() {
                     <MonitorUp size={20} />
                   </button>
 
-                  <button className="p-3 bg-red-600 rounded-full text-white hover:bg-red-700">
-                    <PhoneOff size={20} />
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                      onClick={handleLeaveRoom}
+                    >
+                      Leave
+                    </button>
+
+                    {isHost && (
+                      <button
+                        className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+                        onClick={handleEndMeeting}
+                      >
+                        End Meeting
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

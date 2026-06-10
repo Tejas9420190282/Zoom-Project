@@ -64,6 +64,16 @@ const initializeSocket = (server) => {
       }
     });
 
+    // =====================================
+    // End Meeting Socket Event
+    // =====================================
+
+    socket.on("end-meeting", (roomId) => {
+      console.log(`Meeting Ended: ${roomId}`);
+
+      io.to(roomId).emit("meeting-ended", "Host has ended the meeting");
+    });
+
     socket.on("disconnect", () => {
       console.log(`User Disconnected: ${socket.id}`);
     });
