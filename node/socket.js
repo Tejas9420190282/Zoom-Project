@@ -17,12 +17,15 @@ const initializeSocket = (server) => {
     console.log(`User Connected: ${socket.id}`);
 
     // Join Room
-    socket.on("join-room", (roomId) => {
-      socket.join(roomId);
+    socket.on("join-room", (data) => {
+      socket.join(data.roomId);
 
-      console.log(`Socket ${socket.id} joined room ${roomId}`);
+      console.log(`Socket ${socket.id} joined room ${data.roomId}`);
 
-      io.to(roomId).emit("user-joined", `A new user joined room ${roomId}`);
+      io.to(data.roomId).emit("user-joined", {
+        type: "notification",
+        message: `${data.userName} joined the meeting`,
+      });
     });
 
     socket.on("send-message", async (data) => {
@@ -64,6 +67,10 @@ const initializeSocket = (server) => {
       }
     });
 
+    socket.on("raise-hand", (data) => {
+      io.to(data.roomId).emit("hand-raised", data);
+    });
+
     // =====================================
     // End Meeting Socket Event
     // =====================================
@@ -76,6 +83,15 @@ const initializeSocket = (server) => {
 
     socket.on("disconnect", () => {
       console.log(`User Disconnected: ${socket.id}`);
+    });
+
+    socket.on("leave-room", (data) => {
+      socket.leave(data.roomId);
+
+      io.to(data.roomId).emit("user-left", {
+        type: "notification",
+        message: `${data.userName} left the meeting`,
+      });
     });
   });
 

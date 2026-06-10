@@ -21,6 +21,8 @@ function MeetingRoom() {
   const [isHost, setIsHost] = useState(false);
   const [roomInfo, setRoomInfo] = useState(null);
 
+  const [raisedHands, setRaisedHands] = useState([]);
+
   const currentUser = JSON.parse(localStorage.getItem("user"));
 
   const navigate = useNavigate();
@@ -34,6 +36,8 @@ function MeetingRoom() {
   const screenStreamRef = useRef(null);
 
   const [localStream, setLocalStream] = useState(null);
+
+  const [meetingTime, setMeetingTime] = useState(0);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -73,10 +77,20 @@ function MeetingRoom() {
   }, [roomId]);
 
   useEffect(() => {
-    socket.emit("join-room", roomId);
+    socket.emit("join-room", {
+      roomId,
+      userName: currentUser?.name,
+    });
 
-    socket.on("user-joined", async (message) => {
-      console.log("SOCKET EVENT:", message);
+    socket.on("user-joined", async (data) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: data.message,
+          type: "notification",
+        },
+      ]);
 
       const token = localStorage.getItem("token");
 
@@ -92,8 +106,38 @@ function MeetingRoom() {
       setParticipants(response.data.participants);
     });
 
+    socket.on("user-left", (data) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: data.message,
+          type: "notification",
+        },
+      ]);
+    });
+
     socket.on("receive-message", (data) => {
       setMessages((prev) => [...prev, data]);
+    });
+
+    socket.on("hand-raised", (data) => {
+      setRaisedHands((prev) => {
+        const exists = prev.find((user) => user.userId === data.userId);
+
+        if (exists) return prev;
+
+        return [...prev, data];
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: `${data.userName} raised hand ✋`,
+          type: "notification",
+        },
+      ]);
     });
 
     socket.on("meeting-ended", (message) => {
@@ -104,7 +148,9 @@ function MeetingRoom() {
 
     return () => {
       socket.off("user-joined");
+      socket.off("user-left");
       socket.off("receive-message");
+      socket.off("hand-raised");
       socket.off("meeting-ended");
     };
   }, [roomId, navigate]);
@@ -157,6 +203,11 @@ function MeetingRoom() {
           },
         },
       );
+
+      socket.emit("leave-room", {
+        roomId,
+        userName: currentUser?.name,
+      });
 
       navigate("/home");
     } catch (error) {
@@ -324,6 +375,44 @@ function MeetingRoom() {
     }
   };
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMeetingTime((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRaiseHand = () => {
+    const alreadyRaised = raisedHands.some(
+      (item) => item.userId === currentUser.id,
+    );
+
+    if (alreadyRaised) return;
+
+    socket.emit("raise-hand", {
+      roomId,
+      userId: currentUser.id,
+      userName: currentUser.name,
+    });
+  };
+
+  const formatTime = (seconds) => {
+    const hrs = String(Math.floor(seconds / 3600)).padStart(2, "0");
+
+    const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+
+    const secs = String(seconds % 60).padStart(2, "0");
+
+    return `${hrs}:${mins}:${secs}`;
+  };
+
+  const handleCopyRoomId = () => {
+    navigator.clipboard.writeText(roomId);
+
+    alert("Room ID copied successfully");
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="flex h-screen">
@@ -336,12 +425,27 @@ function MeetingRoom() {
 
                 <p className="text-sm text-gray-500 mt-1">Room ID</p>
 
-                <p className="font-mono text-blue-600">{roomId}</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="font-mono text-blue-600">{roomId}</p>
+
+                  <button
+                    onClick={handleCopyRoomId}
+                    className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 relative">
-                <div className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-medium">
-                  🟢 Active
+                <div className="flex gap-3">
+                  <div className="bg-green-100 text-green-700 px-3 py-2 rounded-lg text-sm font-medium">
+                    🟢 Active
+                  </div>
+
+                  <div className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium">
+                    ⏱ {formatTime(meetingTime)}
+                  </div>
                 </div>
 
                 <div
@@ -373,7 +477,27 @@ function MeetingRoom() {
                             </div>
 
                             <div>
-                              <p className="font-medium">{user.name}</p>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-gray-800">
+                                    {user.name}
+                                  </p>
+
+                                  {raisedHands.some(
+                                    (item) => item.userId === user.id,
+                                  ) && (
+                                    <span className="text-yellow-500 text-lg">
+                                      ✋
+                                    </span>
+                                  )}
+                                </div>
+
+                                {roomInfo?.hostId === user.id && (
+                                  <span className="text-yellow-500 font-semibold">
+                                    👑
+                                  </span>
+                                )}
+                              </div>
 
                               <p className="text-xs text-gray-500">
                                 {user.email}
@@ -466,6 +590,13 @@ function MeetingRoom() {
                     <MonitorUp size={20} />
                   </button>
 
+                  <button
+                    onClick={handleRaiseHand}
+                    className="p-3 bg-yellow-500 rounded-full text-white hover:bg-yellow-600"
+                  >
+                    ✋
+                  </button>
+
                   <div className="flex gap-3">
                     <button
                       className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -504,9 +635,17 @@ function MeetingRoom() {
 
             {messages.map((msg, index) => (
               <div key={index} className="mb-3">
-                <p className="font-semibold">{msg.sender}</p>
+                {msg.type === "notification" ? (
+                  <div className="text-center text-sm text-blue-600 font-medium">
+                    {msg.message}
+                  </div>
+                ) : (
+                  <>
+                    <p className="font-semibold">{msg.sender}</p>
 
-                <p>{msg.message}</p>
+                    <p>{msg.message}</p>
+                  </>
+                )}
               </div>
             ))}
 
