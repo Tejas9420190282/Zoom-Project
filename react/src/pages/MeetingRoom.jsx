@@ -29,6 +29,11 @@ function MeetingRoom() {
 
   const localVideoRef = useRef(null);
 
+  const remoteVideoRef = useRef(null);
+
+  const peerConnectionRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
 
@@ -50,7 +55,7 @@ function MeetingRoom() {
       const token = localStorage.getItem("token");
 
       const response = await axios.get(
-        `http://localhost:1819/api/room/${roomId}/participants`,
+        `${import.meta.env.VITE_BACKEND_URL}/room/${roomId}/participants`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -77,91 +82,12 @@ function MeetingRoom() {
   }, [roomId]);
 
   useEffect(() => {
-    socket.emit("join-room", {
-      roomId,
-      userName: currentUser?.name,
-    });
-
-    socket.on("user-joined", async (data) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "System",
-          message: data.message,
-          type: "notification",
-        },
-      ]);
-
-      const token = localStorage.getItem("token");
-
-      const response = await axios.get(
-        `http://localhost:1819/api/room/${roomId}/participants`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-
-      setParticipants(response.data.participants);
-    });
-
-    socket.on("user-left", (data) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "System",
-          message: data.message,
-          type: "notification",
-        },
-      ]);
-    });
-
-    socket.on("receive-message", (data) => {
-      setMessages((prev) => [...prev, data]);
-    });
-
-    socket.on("hand-raised", (data) => {
-      setRaisedHands((prev) => {
-        const exists = prev.find((user) => user.userId === data.userId);
-
-        if (exists) return prev;
-
-        return [...prev, data];
-      });
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "System",
-          message: `${data.userName} raised hand ✋`,
-          type: "notification",
-        },
-      ]);
-    });
-
-    socket.on("meeting-ended", (message) => {
-      alert(message);
-
-      navigate("/home");
-    });
-
-    return () => {
-      socket.off("user-joined");
-      socket.off("user-left");
-      socket.off("receive-message");
-      socket.off("hand-raised");
-      socket.off("meeting-ended");
-    };
-  }, [roomId, navigate]);
-
-  useEffect(() => {
     const getMessages = async () => {
       try {
         const token = localStorage.getItem("token");
 
         const response = await axios.get(
-          `http://localhost:1819/api/chat/${roomId}/messages`,
+          `${import.meta.env.VITE_BACKEND_URL}/chat/${roomId}/messages`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -183,7 +109,7 @@ function MeetingRoom() {
 
     socket.emit("send-message", {
       roomId,
-      sender: "Tejas",
+      sender: currentUser?.name,
       message,
     });
 
@@ -195,7 +121,7 @@ function MeetingRoom() {
       const token = localStorage.getItem("token");
 
       await axios.post(
-        "http://localhost:1819/api/room/leave-room",
+        `${import.meta.env.VITE_BACKEND_URL}/room/leave-room`,
         { roomId },
         {
           headers: {
@@ -220,7 +146,7 @@ function MeetingRoom() {
       const token = localStorage.getItem("token");
 
       const response = await axios.post(
-        "http://localhost:1819/api/room/end-meeting",
+        `${import.meta.env.VITE_BACKEND_URL}/room/end-meeting`,
         { roomId },
         {
           headers: {
@@ -263,9 +189,11 @@ function MeetingRoom() {
     startCamera();
 
     return () => {
-      localStream?.getTracks().forEach((track) => {
-        track.stop();
-      });
+      if (localVideoRef.current?.srcObject) {
+        localVideoRef.current.srcObject
+          .getTracks()
+          .forEach((track) => track.stop());
+      }
 
       screenStreamRef.current?.getTracks().forEach((track) => {
         track.stop();
@@ -337,7 +265,8 @@ function MeetingRoom() {
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = null;
-          localVideoRef.current.srcObject = screenStream;
+          /* localVideoRef.current.srcObject = screenStream; */
+          localVideoRef.current.srcObject = localStream;
           await localVideoRef.current.play();
         }
 
@@ -412,6 +341,200 @@ function MeetingRoom() {
 
     alert("Room ID copied successfully");
   };
+
+  const createPeerConnection = () => {
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: "stun:stun.l.google.com:19302",
+        },
+      ],
+    });
+
+    // Local Tracks -> Remote User
+    localStream?.getTracks().forEach((track) => {
+      console.log("ADDING TRACK:", track.kind);
+      peer.addTrack(track, localStream);
+    });
+
+    // Remote Tracks -> Remote Video Element
+    peer.ontrack = (event) => {
+      console.log("REMOTE TRACK RECEIVED");
+      const remoteStream = event.streams[0];
+
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
+    };
+
+    // ICE Candidate
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", {
+          roomId,
+          candidate: event.candidate,
+        });
+      }
+    };
+
+    peerConnectionRef.current = peer;
+
+    return peer;
+  };
+
+  const createOffer = async () => {
+    try {
+      const peer = createPeerConnection();
+
+      const offer = await peer.createOffer();
+
+      await peer.setLocalDescription(offer);
+
+      socket.emit("offer", {
+        roomId,
+        offer,
+      });
+
+      console.log("Offer Sent");
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  useEffect(() => {
+    socket.emit("join-room", {
+      roomId,
+      userName: currentUser?.name,
+    });
+
+    socket.on("user-joined", async (data) => {
+      createOffer();
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: data.message,
+          type: "notification",
+        },
+      ]);
+
+      const token = localStorage.getItem("token");
+
+      const response = await axios.get(
+        `${import.meta.env.VITE_BACKEND_URL}/room/${roomId}/participants`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      setParticipants(response.data.participants);
+    });
+
+    socket.on("user-left", (data) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: data.message,
+          type: "notification",
+        },
+      ]);
+    });
+
+    socket.on("receive-message", (data) => {
+      setMessages((prev) => [...prev, data]);
+    });
+
+    socket.on("hand-raised", (data) => {
+      setRaisedHands((prev) => {
+        const exists = prev.find((user) => user.userId === data.userId);
+
+        if (exists) return prev;
+
+        return [...prev, data];
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "System",
+          message: `${data.userName} raised hand ✋`,
+          type: "notification",
+        },
+      ]);
+    });
+
+    socket.on("meeting-ended", (message) => {
+      alert(message);
+
+      navigate("/home");
+    });
+
+    socket.on("offer", async (data) => {
+      try {
+        const peer = createPeerConnection();
+
+        await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+        const answer = await peer.createAnswer();
+
+        await peer.setLocalDescription(answer);
+
+        socket.emit("answer", {
+          roomId,
+          answer,
+        });
+
+        console.log("Answer Sent");
+      } catch (error) {
+        console.error(error);
+      }
+    });
+
+    socket.on("answer", async (data) => {
+      try {
+        await peerConnectionRef.current.setRemoteDescription(
+          new RTCSessionDescription(data.answer),
+        );
+
+        console.log("Answer Received");
+      } catch (error) {
+        console.error(error);
+      }
+    });
+
+    socket.on("ice-candidate", async (data) => {
+      try {
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(
+            new RTCIceCandidate(data.candidate),
+          );
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    });
+
+    return () => {
+      socket.off("user-joined");
+      socket.off("user-left");
+      socket.off("receive-message");
+      socket.off("hand-raised");
+      socket.off("meeting-ended");
+      socket.off("offer");
+      socket.off("answer");
+      socket.off("ice-candidate");
+    };
+  }, [roomId, navigate]);
+
+  useEffect(() => {
+    chatContainerRef.current?.scrollTo({
+      top: chatContainerRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -518,13 +641,24 @@ function MeetingRoom() {
                 <div className="flex-1 bg-[#1c1c1c] rounded-xl flex items-center justify-center">
                   <div className="relative w-full h-full flex items-center justify-center p-4">
                     {isCameraOn ? (
-                      <video
-                        ref={localVideoRef}
-                        autoPlay
-                        muted
-                        playsInline
-                        className="w-full h-full rounded-xl object-cover"
-                      />
+                      <>
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className="w-full h-full rounded-xl object-cover"
+                        />
+
+                        {remoteVideoRef && (
+                          <video
+                            ref={remoteVideoRef}
+                            autoPlay
+                            playsInline
+                            className="absolute top-5 right-5 w-64 h-40 rounded-lg border-2 border-white bg-black"
+                          />
+                        )}
+                      </>
                     ) : (
                       <div className="flex flex-col items-center justify-center w-full h-full">
                         <div className="w-32 h-32 rounded-full bg-blue-600 text-white text-5xl font-bold flex items-center justify-center">
@@ -628,7 +762,10 @@ function MeetingRoom() {
     ${showChat ? "w-[350px]" : "w-0"}
   `}
         >
-          <div className="w-[350px] bg-white border-l shadow-lg flex flex-col">
+          <div
+            ref={chatContainerRef}
+            className="w-[350px] bg-white border-l shadow-lg flex flex-col overflow-y-auto"
+          >
             <div className="p-5 border-b">
               <h2 className="text-2xl font-bold">Chat</h2>
             </div>

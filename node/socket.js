@@ -8,7 +8,7 @@ let io;
 const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: "http://localhost:5173",
+      origin: ["http://localhost:5173", "http://10.65.165.224:5173"],
       credentials: true,
     },
   });
@@ -22,7 +22,7 @@ const initializeSocket = (server) => {
 
       console.log(`Socket ${socket.id} joined room ${data.roomId}`);
 
-      io.to(data.roomId).emit("user-joined", {
+      socket.to(data.roomId).emit("user-joined", {
         type: "notification",
         message: `${data.userName} joined the meeting`,
       });
@@ -72,6 +72,39 @@ const initializeSocket = (server) => {
     });
 
     // =====================================
+    // WebRTC Offer
+    // =====================================
+
+    socket.on("offer", (data) => {
+      socket.to(data.roomId).emit("offer", {
+        offer: data.offer,
+        senderId: socket.id,
+      });
+    });
+
+    // =====================================
+    // WebRTC Answer
+    // =====================================
+
+    socket.on("answer", (data) => {
+      socket.to(data.roomId).emit("answer", {
+        answer: data.answer,
+        senderId: socket.id,
+      });
+    });
+
+    // =====================================
+    // ICE Candidate
+    // =====================================
+
+    socket.on("ice-candidate", (data) => {
+      socket.to(data.roomId).emit("ice-candidate", {
+        candidate: data.candidate,
+        senderId: socket.id,
+      });
+    });
+
+    // =====================================
     // End Meeting Socket Event
     // =====================================
 
@@ -88,7 +121,7 @@ const initializeSocket = (server) => {
     socket.on("leave-room", (data) => {
       socket.leave(data.roomId);
 
-      io.to(data.roomId).emit("user-left", {
+      socket.to(data.roomId).emit("user-left", {
         type: "notification",
         message: `${data.userName} left the meeting`,
       });

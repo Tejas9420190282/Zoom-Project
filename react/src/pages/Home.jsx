@@ -16,7 +16,7 @@ function Home() {
       console.log("FRONTEND TOKEN:", token);
 
       const response = await axios.post(
-        "http://localhost:1819/api/room/create-room",
+        `${import.meta.env.VITE_BACKEND_URL}/room/create-room`,
         {},
         {
           headers: {
@@ -42,7 +42,7 @@ function Home() {
       const token = localStorage.getItem("token");
 
       const response = await axios.post(
-        "http://localhost:1819/api/room/join-room",
+        `${import.meta.env.VITE_BACKEND_URL}/room/join-room`,
         {
           roomId,
         },
